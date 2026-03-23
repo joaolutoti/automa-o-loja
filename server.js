@@ -266,23 +266,31 @@ app.post("/api/whatsapp", async (req, res) => {
 
     // Caso 2: só foto sem legenda — guarda no buffer
     if (temFoto && !textoFinal) {
+      const buffered = wppBuffer.get(phone);
+      if (buffered && buffered.texto) {
+        // já tinha texto no buffer — junta agora
+        wppBuffer.delete(phone);
+        await salvarPostWpp(buffered.postId, buffered.store, buffered.texto, imageUrl);
+        return res.status(201).json({ msg: "Post salvo com texto + foto!", id: buffered.postId });
+      }
       const postId = `wpp_${Date.now()}`;
       wppBuffer.set(phone, { postId, imageSource: imageUrl, store, ts: Date.now() });
       return res.json({ msg: "Foto guardada, aguardando descrição..." });
     }
 
-    // Caso 3: só texto — verifica se tem foto no buffer
+    // Caso 3: só texto — verifica se tem foto no buffer ou guarda texto
     if (!temFoto && textoFinal) {
       const buffered = wppBuffer.get(phone);
-      if (buffered) {
+      if (buffered && buffered.imageSource) {
+        // tinha foto no buffer — junta agora
         wppBuffer.delete(phone);
         await salvarPostWpp(buffered.postId, buffered.store, textoFinal, buffered.imageSource);
-        return res.status(201).json({ msg: "Post salvo com foto + descrição!", id: buffered.postId });
+        return res.status(201).json({ msg: "Post salvo com foto + texto!", id: buffered.postId });
       }
-      // Texto sem foto no buffer — salva só texto
+      // Guarda texto no buffer aguardando foto
       const postId = `wpp_${Date.now()}`;
-      await salvarPostWpp(postId, store, textoFinal, "");
-      return res.status(201).json({ msg: "Post salvo (sem foto)", id: postId });
+      wppBuffer.set(phone, { postId, texto: textoFinal, store, ts: Date.now() });
+      return res.json({ msg: "Texto guardado, aguardando foto..." });
     }
 
   } catch (e) {
