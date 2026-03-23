@@ -242,10 +242,11 @@ app.post("/api/whatsapp", async (req, res) => {
   const phone = data.phone || "default";
   const store = data.senderName ? `@${data.senderName.replace(/\s+/g, "").toLowerCase()}` : "@whatsapp";
 
-  // Campos vindos do Make
-  const textoMensagem = (data.text || "").trim();       // só texto
-  const imageUrl = (data.imageUrl || "").trim();        // URL da foto
-  const caption = (data.caption || "").trim();          // legenda da foto
+  // Campos vindos do Make — limpa "undefined" string que o Make às vezes envia
+  const clean = v => (!v || v === "undefined" || v === "null") ? "" : String(v).trim();
+  const textoMensagem = clean(data.text);
+  const imageUrl = clean(data.imageUrl);
+  const caption = clean(data.caption);
 
   const temFoto = !!imageUrl;
   const textoFinal = caption || textoMensagem;
