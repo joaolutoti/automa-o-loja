@@ -122,11 +122,23 @@ app.post("/api/lojas/remove", async (req, res) => {
 });
 
 // ── Posts ──────────────────────────────────────────────────────
-app.get("/api/dados", async (req, res) => {
+async function getPosts() {
+  // Tenta com created_at, se falhar usa sem ordenação
   try {
     const [rows] = await pool.query("SELECT * FROM posts ORDER BY created_at DESC LIMIT 600");
+    return rows;
+  } catch {
+    const [rows] = await pool.query("SELECT * FROM posts LIMIT 600");
+    return rows;
+  }
+}
+
+app.get("/api/dados", async (req, res) => {
+  try {
+    const rows = await getPosts();
     res.json(rows.map(r => ({ ...r, keywords: JSON.parse(r.keywords || "[]") })));
   } catch (e) {
+    console.error("Erro /api/dados:", e.message);
     res.json([]);
   }
 });
@@ -134,7 +146,7 @@ app.get("/api/dados", async (req, res) => {
 // Alias para compatibilidade
 app.get("/api/posts", async (req, res) => {
   try {
-    const [rows] = await pool.query("SELECT * FROM posts ORDER BY created_at DESC LIMIT 600");
+    const rows = await getPosts();
     res.json(rows.map(r => ({ ...r, keywords: JSON.parse(r.keywords || "[]") })));
   } catch (e) {
     res.json([]);
