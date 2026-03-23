@@ -142,8 +142,13 @@ def coletar_perfil_rapido(page, perfil):
                     r = page.request.get(img_src)
                     with open(nome_arquivo, "wb") as f:
                         f.write(r.body())
-                    img_local = f"/imagens/{perfil}_{shortcode}.jpg"
+                    img_local = nome_arquivo
                 except: pass
+
+            # Converte imagem local para Base64 para funcionar na nuvem (Hostinger) sem arquivos
+            img_b64 = ""
+            if img_local:
+                img_b64 = _imagem_para_b64(img_local)
 
             palavras = [w.strip('#@').lower() for w in legenda.split() if len(w)>3]
             posts.append({
@@ -153,7 +158,7 @@ def coletar_perfil_rapido(page, perfil):
                 "title":       extrair_titulo(legenda),
                 "description": legenda[:400] or "Sem descrição.",
                 "price":       extrair_preco(legenda),
-                "image":       img_local or img_src,
+                "image":       img_b64 or img_src, # Prioriza Base64 se disponível
                 "url":         link_post,
                 "date":        time.strftime("%d/%m/%Y"),
                 "likes":       0,
@@ -198,16 +203,19 @@ def coletar_stories_rapido(page, perfil):
 
             ts = int(time.time())
             nome = f"{PASTA_IMAGENS}/story_{perfil}_{slide}_{ts}.jpg"
+            img_b64 = ""
             try:
                 r = page.request.get(img_src)
                 with open(nome, "wb") as f: f.write(r.body())
+                if os.path.exists(nome):
+                    img_b64 = _imagem_para_b64(nome)
             except: nome = ""
 
             stories.append({
                 "id": f"story_{perfil}_{ts}", "tipo": "story",
                 "store": f"@{perfil}", "title": f"Story de @{perfil}",
                 "description": f"Story capturado em {time.strftime('%d/%m/%Y %H:%M')} — dura 24h.",
-                "price": "Consulte", "image": nome if os.path.exists(nome) else "",
+                "price": "Consulte", "image": img_b64 or img_src,
                 "url": f"https://www.instagram.com/{perfil}/",
                 "date": time.strftime("%d/%m/%Y"), "likes": 0,
                 "keywords": ["story", perfil.lower()],
@@ -236,41 +244,58 @@ def salvar(dados):
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
         json.dump(dados, f, ensure_ascii=False, indent=2)
 
-RENDER_API = os.environ.get("RENDER_API_URL", "https://automa-o-loja.onrender.com")
+RENDER_API = os.environ.get("PRODUCAO_API_URL", "https://advogadoararaquara.com.br")
 
 def carregar_lojas():
-    lojas_render = []
-    lojas_local = []
+    lojas_final = []
 
-    # 1. Busca do Render
-    try:
-        import urllib.request
-        with urllib.request.urlopen(f"{RENDER_API}/api/lojas", timeout=8) as r:
-            lojas_render = json.loads(r.read().decode())
-            print(f"   ✅ {len(lojas_render)} lojas carregadas do Render.")
-    except Exception as e:
-        print(f"⚠️ Render indisponível: {e}")
+    # 1. Tenta carregar do banco de dados (Neon/Postgres/SQLite local)
+    if _db:
+        try:
+            lojas_db = _db.ler_lojas()
+            if lojas_db:
+                print(f"   ✅ {len(lojas_db)} lojas carregadas do banco de dados.")
+                lojas_final = lojas_db
+        except Exception as e:
+            print(f"⚠️ Erro ao ler lojas do banco: {e}")
 
-    # 2. Carrega lojas.json local
+    # 2. Se falhar ou estiver vazio, tenta do Render/API externa
+    if not lojas_final:
+        try:
+            import urllib.request
+            with urllib.request.urlopen(f"{RENDER_API}/api/lojas", timeout=8) as r:
+                lojas_final = json.loads(r.read().decode())
+                print(f"   ✅ {len(lojas_final)} lojas carregadas da API ({RENDER_API}).")
+        except Exception as e:
+            print(f"⚠️ API indisponível: {e}")
+
+    # 3. Fallback: lojas.json local
+    if not lojas_final:
+        try:
+            if os.path.exists("lojas.json"):
+                with open("lojas.json", "r", encoding="utf-8") as f:
+                    lojas_final = json.load(f)
+                    print(f"   ✅ {len(lojas_final)} lojas carregadas do lojas.json local.")
+        except:
+            pass
+
+    # 4. Fallback final: Hardcoded
+    if not lojas_final:
+        lojas_final = ["repassesgr", "cwb.repasse_", "autopar.repasses"]
+        print("   ℹ️ Usando lojas padrão (fallback).")
+
+    # Garante remover duplicatas e limpar strings
+    lojas_final = list(dict.fromkeys([p.strip().lower() for p in lojas_final if p]))
+
+    # Opcional: Salva no lojas.json local para cache
     try:
-        if os.path.exists("lojas.json"):
-            with open("lojas.json", "r", encoding="utf-8") as f:
-                lojas_local = json.load(f)
+        with open("lojas.json", "w", encoding="utf-8") as f:
+            json.dump(lojas_final, f, indent=2, ensure_ascii=False)
     except:
         pass
 
-    # 3. Mescla sem duplicatas
-    todas = list(dict.fromkeys(lojas_render + lojas_local))
-
-    if not todas:
-        todas = ["repassesgr", "cwb.repasse_", "autopar.repasses"]
-
-    # 4. Salva lista mesclada no lojas.json local
-    with open("lojas.json", "w", encoding="utf-8") as f:
-        json.dump(todas, f, indent=2, ensure_ascii=False)
-
-    print(f"   📋 Total de lojas para scraper: {len(todas)}")
-    return todas
+    print(f"   📋 Total de lojas para scraper: {len(lojas_final)}")
+    return lojas_final
 
 def _imagem_para_b64(image_field):
     """Converte imagem (local ou URL) para base64."""
@@ -284,47 +309,52 @@ def _imagem_para_b64(image_field):
             caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), caminho)
         if os.path.exists(caminho):
             with open(caminho, "rb") as f:
-                return _b64.b64encode(f.read()).decode()
+                encoded = _b64.b64encode(f.read()).decode()
+                return f"data:image/jpeg;base64,{encoded}"
         return ""
     # URL do Instagram CDN
     if image_field.startswith("http"):
         try:
             req = urllib.request.Request(image_field, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=10) as r:
-                return _b64.b64encode(r.read()).decode()
+                encoded = _b64.b64encode(r.read()).decode()
+                return f"data:image/jpeg;base64,{encoded}"
         except:
             return ""
     return ""
 
 def enviar_para_render(todos):
-    """Adiciona posts novos no Render sem apagar os existentes, com imagem embutida."""
+    """Envia todos os posts para a PRODUÇÃO em lotes (para evitar payload muito grande)."""
     import urllib.request
-    enviados = 0
-    duplicatas = 0
-    erros = 0
-    print(f"\n📤 Enviando {len(todos)} posts para o Render (sem apagar antigos)...")
+    print(f"\n📤 Sincronizando {len(todos)} posts com a produção ({RENDER_API})...")
+    
+    # Prepara os dados: garante que todas as imagens sejam Base64
+    dados_preparados = []
     for post in todos:
-        try:
-            payload = dict(post)
-            b64 = _imagem_para_b64(payload.get("image", ""))
-            if b64:
-                payload["image_b64"] = b64
+        p = dict(post)
+        if p.get("image") and not p["image"].startswith("data:") and not p["image"].startswith("http"):
+             p["image"] = _imagem_para_b64(p["image"]) or p["image"]
+        dados_preparados.append(p)
 
-            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    # Envia em lotes de 5 para ser o mais leve possível e evitar erro 503/Quota na Hostinger
+    lote_tamanho = 5
+    for i in range(0, len(dados_preparados), lote_tamanho):
+        lote = dados_preparados[i : i + lote_tamanho]
+        try:
+            data = json.dumps(lote, ensure_ascii=False).encode("utf-8")
             req = urllib.request.Request(
-                f"{RENDER_API}/api/posts/add",
+                f"{RENDER_API}/api/posts/sync",
                 data=data,
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=20) as r:
-                if r.status == 201:
-                    enviados += 1
-                else:
-                    duplicatas += 1
-        except Exception:
-            erros += 1
-    print(f"   ✅ {enviados} novos | ⏭️ {duplicatas} já existiam | ⚠️ {erros} erros")
+            with urllib.request.urlopen(req, timeout=80) as r:
+                res_data = json.loads(r.read().decode())
+                print(f"   📦 Lote {i//lote_tamanho + 1} enviado: {res_data.get('msg', 'OK')}")
+        except Exception as e:
+            print(f"   ⚠️ ERRO no lote {i//lote_tamanho + 1}: {e}")
+    
+    print("✅ Sincronização concluída!")
 
 
 def coletar_dados():
@@ -380,9 +410,20 @@ def coletar_dados():
     s = sum(1 for x in todos if x["tipo"]=="story")
     print(f"\n🎉 Concluído! {p} posts + {s} stories → dados.json")
 
-    # Envia posts para o Render automaticamente
-    enviar_para_render(todos)
+    # 1. Salva DIRETO no banco de dados se o db.py estiver disponível
+    if _db:
+        try:
+            print("🗄️ Salvando dados diretamente no banco de dados (Neon)...")
+            _db.salvar_todos_posts(todos)
+            print("   ✅ Banco de dados atualizado com sucesso!")
+        except Exception as e:
+            print(f"⚠️ Erro ao salvar no banco direto: {e}")
 
+    # 2. Envia para a PRODUÇÃO (API externa) — para atualizar o site advogadoararaquara.com.br
+    if RENDER_API:
+        enviar_para_render(todos)
+
+    print("\n▶️  Tudo pronto! Seus dados já estão no Neon.")
     print("▶️  Inicie a API:  python api.py\n")
 
 if __name__ == "__main__":

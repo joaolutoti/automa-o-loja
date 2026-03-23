@@ -6,20 +6,25 @@ import json
 import os
 import sqlite3
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+# Configuração do banco de dados (Neon PostgreSQL)
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://neondb_owner:npg_PXkzu0Bji9dn@ep-dark-shape-a4mubkj5-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require")
 
 # Testa conexão PG antes de decidir qual backend usar
 USE_PG = False
 if DATABASE_URL:
     try:
         import psycopg2 as _test_pg
-        _conn = _test_pg.connect(DATABASE_URL, connect_timeout=5)
+        _conn = _test_pg.connect(DATABASE_URL, connect_timeout=10)
         _conn.close()
         USE_PG = True
-        print("✅ Conectado ao Supabase (PostgreSQL)")
+        print(f"✅ CONEXÃO ESTABELECIDA: PostgreSQL (Neon/Supabase)")
     except Exception as _e:
-        print(f"⚠️ Supabase indisponível, usando SQLite: {_e}")
+        print(f"⚠️ AVISO: DATABASE_URL presente mas falhou ao conectar: {_e}")
+        print("   -> O sistema usará SQLite local (.db) temporariamente.")
         USE_PG = False
+else:
+    print("ℹ️ DATABASE_URL não encontrada. Usando SQLite local.")
+    USE_PG = False
 
 LOJAS_DEFAULT = ["repassesgr", "cwb.repasse_", "autopar.repasses"]
 
@@ -119,15 +124,26 @@ if USE_PG:
             return False
 
     def salvar_todos_posts(lista: list):
+        if not lista:
+            print("⚠️ Aviso: Lista de posts vazia no salvar_todos_posts. Pulando delete para não apagar o banco.")
+            return
+
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM posts")
+                # Em vez de deletar tudo, vamos fazer UPSERT (Insert or Update)
+                # Assim se um scraper falhar ou voltar vaziou num deploy, não perdemos o histórico.
                 for post in lista:
                     keywords = json.dumps(post.get("keywords", []), ensure_ascii=False)
                     cur.execute("""
                         INSERT INTO posts (id, tipo, store, title, description, price, image, url, date, likes, keywords)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO NOTHING
+                        ON CONFLICT (id) DO UPDATE SET
+                            title       = EXCLUDED.title,
+                            description = EXCLUDED.description,
+                            price       = EXCLUDED.price,
+                            image       = EXCLUDED.image,
+                            date        = EXCLUDED.date,
+                            keywords    = EXCLUDED.keywords
                     """, (
                         post.get("id"), post.get("tipo", "post"), post.get("store"),
                         post.get("title"), post.get("description"), post.get("price", "Consulte"),
@@ -219,12 +235,23 @@ else:
             return False
 
     def salvar_todos_posts(lista: list):
+        if not lista:
+            print("⚠️ Aviso: Lista de posts vazia no salvar_todos_posts. Pulando delete.")
+            return
+
         with get_conn() as conn:
-            conn.execute("DELETE FROM posts")
+            # Mantemos o histórico e atualizamos o que já existe
             for post in lista:
                 keywords = json.dumps(post.get("keywords", []), ensure_ascii=False)
                 conn.execute("""
-                    INSERT OR REPLACE INTO posts (id, tipo, store, title, description, price, image, url, date, likes, keywords)
+                    INSERT INTO posts (id, tipo, store, title, description, price, image, url, date, likes, keywords)
                     VALUES (:id, :tipo, :store, :title, :description, :price, :image, :url, :date, :likes, :keywords)
+                    ON CONFLICT (id) DO UPDATE SET
+                        title       = excluded.title,
+                        description = excluded.description,
+                        price       = excluded.price,
+                        image       = excluded.image,
+                        date        = excluded.date,
+                        keywords    = excluded.keywords
                 """, {**post, "keywords": keywords})
             conn.commit()

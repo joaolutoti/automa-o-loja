@@ -649,16 +649,16 @@ body.modo-cliente #filtro-loja-wrapper {
 
 /* Borra textos por cima do card de forma moderada */
 body.modo-cliente .card-title {
-    filter: blur(4px) !important;
-    opacity: 0.5 !important;
+    filter: blur(1.5px) !important;
+    opacity: 0.7 !important;
     user-select: none !important;
     pointer-events: none !important;
 }
 
 body.modo-cliente .card-desc,
 body.modo-cliente .card-meta {
-    filter: blur(1px) !important;
-    opacity: 0.6 !important;
+    filter: blur(0.5px) !important;
+    opacity: 0.8 !important;
     user-select: none !important;
     pointer-events: none !important;
 }
@@ -670,9 +670,9 @@ body.modo-cliente .card-img::after {
     display: block;
     position: absolute;
     inset: 0;
-    background: rgba(15, 23, 42, 0.15);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: rgba(15, 23, 42, 0.1);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     z-index: 10;
 }
 

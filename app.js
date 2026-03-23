@@ -3,10 +3,8 @@
  * Filtros: busca + loja + tipo + ordenação
  */
 
-// URL da API — troque para o endereço do Render em produção
-const API_URL = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-  ? ""
-  : "https://advogadoararaquara.com.br";
+// URL da API — use relativo "" se o frontend e backend estiverem no mesmo servidor
+const API_URL = "";
 
 const EXEMPLO = [
     { id: "e1", tipo: "post", store: "@repassesgr", title: "Chevrolet Zafira Elite 2012", description: "⭐ Zafira Elite completa! Teto solar, automática, bancos em couro. Raridade!", price: "R$ 38.900", image: "", url: "https://www.instagram.com/repassesgr/", date: "15/03/2026", likes: 87, keywords: ["zafira", "chevrolet", "7lugares", "automatica"] },
@@ -65,11 +63,18 @@ if (btnLinkCliente) {
 // ── Carga de dados ─────────────────────────────────────────
 async function carregar() {
     try {
-        const r = await fetch(API_URL + "/api/dados");
+        const r = await fetch(API_URL + "/api/posts");
         if (!r.ok) throw new Error();
         const d = await r.json();
-        DATA = d.length ? d : fallback();
+        // Garante que keywords e outros campos sejam interpretados corretamente do Banco
+        DATA = d.map(item => ({
+            ...item,
+            keywords: typeof item.keywords === 'string' ? JSON.parse(item.keywords) : (item.keywords || [])
+        }));
+
+        DATA = DATA.length ? DATA : fallback();
         if (DATA === EXEMPLO) noticeEl.style.display = "block";
+        else noticeEl.style.display = "none";
 
         const st = await fetch(API_URL + "/api/status").then(x => x.json()).catch(() => null);
         if (st && statusEl) {
@@ -143,9 +148,11 @@ function render(lista) {
     lista.forEach((c, i) => {
         const cl = cor(c.store);
         const isS = c.tipo === "story";
-        const img = c.image ? `/imagens/${c.image.split(/[/\\]/).pop()}` :
-            isS ? "https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?auto=format&fit=crop&q=80&w=800"
-                : "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80&w=800";
+        const img = c.image && (c.image.startsWith("data:image") || c.image.startsWith("http") || c.image.startsWith("/api/"))
+            ? c.image
+            : c.image ? `/api/imagens/${c.image.split(/[/\\]/).pop()}`
+                : isS ? "https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?auto=format&fit=crop&q=80&w=800"
+                    : "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80&w=800";
 
         let btnText = isS ? 'Ver Story ↗' : 'Ver Post ↗';
         let btnHref = c.url;

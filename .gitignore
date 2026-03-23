@@ -9,10 +9,16 @@ __pycache__/
 # O Docker vai criar a pasta "imagens" na nuvem, não precisamos subir peso morto
 # imagens/
 
-# NÃO IGNORAR A SESSÃO DO INSTAGRAM!
-# Precisamos subir a pasta sessao_ig/ para o robô da nuvem já nascer logado
+# NÃO IGNORAR A SESSÃO DO INSTAGRAM (apenas os arquivos essenciais)!
+# Ignoramos Cache e lixo para evitar erro de "Permission Denied" no Git
+sessao_ig/**/Cache/
+sessao_ig/**/Code Cache/
+sessao_ig/**/GPUCache/
+sessao_ig/**/*.lock
 !sessao_ig/
 
 # Ignorar o dados locais se quiser que o servidor colete pela primeira vez online (opcional)
-# dados.js
-# dados.json
+dados.js
+dados.json
+repasse.db
+lojas.json
