@@ -222,43 +222,48 @@ async function salvarPostWpp(postId, store, caption, imageSource) {
 // ── WhatsApp via Z-API + Make ──────────────────────────────────
 app.post("/api/whatsapp", async (req, res) => {
   const data = req.body || {};
-  const image = typeof data.image === "object" ? data.image : {};
-  const caption = image.caption || data.text || "";
-  const imageSource = image.url || image.imageUrl || image.base64 || "";
   const phone = data.phone || "default";
   const store = data.senderName ? `@${data.senderName.replace(/\s+/g, "").toLowerCase()}` : "@whatsapp";
 
-  if (!caption && !imageSource) {
+  // Campos vindos do Make
+  const textoMensagem = (data.text || "").trim();       // só texto
+  const imageUrl = (data.imageUrl || "").trim();        // URL da foto
+  const caption = (data.caption || "").trim();          // legenda da foto
+
+  const temFoto = !!imageUrl;
+  const textoFinal = caption || textoMensagem;
+
+  if (!temFoto && !textoFinal) {
     return res.status(400).json({ erro: "Mensagem sem conteúdo útil" });
   }
 
   try {
-    // Caso 1: veio foto COM legenda — salva direto
-    if (imageSource && caption) {
+    // Caso 1: foto + legenda juntos
+    if (temFoto && textoFinal) {
       const postId = `wpp_${Date.now()}`;
-      await salvarPostWpp(postId, store, caption, imageSource);
+      await salvarPostWpp(postId, store, textoFinal, imageUrl);
       wppBuffer.delete(phone);
       return res.status(201).json({ msg: "Post salvo!", id: postId });
     }
 
-    // Caso 2: veio só foto sem legenda — guarda no buffer
-    if (imageSource && !caption) {
+    // Caso 2: só foto sem legenda — guarda no buffer
+    if (temFoto && !textoFinal) {
       const postId = `wpp_${Date.now()}`;
-      wppBuffer.set(phone, { postId, imageSource, store, ts: Date.now() });
+      wppBuffer.set(phone, { postId, imageSource: imageUrl, store, ts: Date.now() });
       return res.json({ msg: "Foto guardada, aguardando descrição..." });
     }
 
-    // Caso 3: veio só texto — verifica se tem foto no buffer
-    if (!imageSource && caption) {
+    // Caso 3: só texto — verifica se tem foto no buffer
+    if (!temFoto && textoFinal) {
       const buffered = wppBuffer.get(phone);
       if (buffered) {
         wppBuffer.delete(phone);
-        await salvarPostWpp(buffered.postId, buffered.store, caption, buffered.imageSource);
+        await salvarPostWpp(buffered.postId, buffered.store, textoFinal, buffered.imageSource);
         return res.status(201).json({ msg: "Post salvo com foto + descrição!", id: buffered.postId });
       }
-      // Texto sem foto — salva só texto
+      // Texto sem foto no buffer — salva só texto
       const postId = `wpp_${Date.now()}`;
-      await salvarPostWpp(postId, store, caption, "");
+      await salvarPostWpp(postId, store, textoFinal, "");
       return res.status(201).json({ msg: "Post salvo (sem foto)", id: postId });
     }
 
