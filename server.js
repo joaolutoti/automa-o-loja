@@ -206,6 +206,67 @@ app.get("/api/status", (req, res) => {
   res.json({ rodando: false, ultima_coleta: null, total_posts: 0, total_stories: 0, erro: null });
 });
 
+// ── WhatsApp via Z-API + Make ──────────────────────────────────
+app.post("/api/whatsapp", async (req, res) => {
+  if (!pool) return res.status(503).json({ erro: "Banco indisponível" });
+
+  const data = req.body || {};
+  const image = data.image || {};
+  const caption = image.caption || data.text || "";
+  const imageUrl = image.url || image.imageUrl || "";
+  const imageB64 = image.imageBase64 || image.base64 || "";
+
+  if (!caption && !imageUrl && !imageB64) {
+    return res.status(400).json({ erro: "Mensagem sem conteúdo útil" });
+  }
+
+  // Extrai preço da legenda (ex: R$45.000 ou R$ 45.000)
+  const precoMatch = caption.match(/R\$\s?[\d.,]+/i);
+  const price = precoMatch ? precoMatch[0].replace(/\s/, "") : "Consulte";
+
+  // Primeira linha como título
+  const linhas = caption.split("\n").map(l => l.trim()).filter(l => l);
+  const titulo = linhas[0] || "Veículo via WhatsApp";
+
+  const postId = `wpp_${Date.now()}`;
+
+  // Salva imagem se vier em base64
+  let finalImageUrl = imageUrl;
+  if (imageB64) {
+    const saved = salvarImagemB64(postId, imageB64);
+    if (saved) finalImageUrl = saved;
+  }
+
+  const keywords = caption.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
+  const post = {
+    id: postId,
+    tipo: "post",
+    store: data.senderName ? `@${data.senderName.replace(/\s+/g, "").toLowerCase()}` : "@whatsapp",
+    title: titulo,
+    description: caption,
+    price,
+    image: finalImageUrl,
+    url: "",
+    date: new Date().toLocaleDateString("pt-BR"),
+    likes: 0,
+    keywords: JSON.stringify(keywords),
+  };
+
+  try {
+    await pool.query(
+      `INSERT INTO posts (id, tipo, store, title, description, price, image, url, date, likes, keywords)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
+      [post.id, post.tipo, post.store, post.title, post.description, post.price, post.image, post.url, post.date, post.likes, post.keywords]
+    );
+    console.log(`✅ Post WhatsApp salvo: ${post.title}`);
+    res.status(201).json({ msg: "Post salvo!", id: post.id });
+  } catch (e) {
+    console.error("Erro ao salvar post WhatsApp:", e.message);
+    res.status(500).json({ erro: e.message });
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 initDb().then(() => {
