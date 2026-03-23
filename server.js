@@ -122,8 +122,16 @@ app.post("/api/lojas/remove", async (req, res) => {
 });
 
 // ── Posts ──────────────────────────────────────────────────────
+function fixImage(img) {
+  if (!img) return img;
+  // já é URL ou caminho local correto
+  if (img.startsWith("http") || img.startsWith("/api/imagens/") || img.startsWith("data:")) return img;
+  // base64 puro (salvo pelo código antigo)
+  if (img.length > 100) return `data:image/jpeg;base64,${img}`;
+  return img;
+}
+
 async function getPosts() {
-  // Tenta com created_at, se falhar usa sem ordenação
   try {
     const [rows] = await pool.query("SELECT * FROM posts ORDER BY created_at DESC LIMIT 600");
     return rows;
@@ -136,7 +144,7 @@ async function getPosts() {
 app.get("/api/dados", async (req, res) => {
   try {
     const rows = await getPosts();
-    res.json(rows.map(r => ({ ...r, keywords: JSON.parse(r.keywords || "[]") })));
+    res.json(rows.map(r => ({ ...r, image: fixImage(r.image), keywords: JSON.parse(r.keywords || "[]") })));
   } catch (e) {
     console.error("Erro /api/dados:", e.message);
     res.json([]);
@@ -147,7 +155,7 @@ app.get("/api/dados", async (req, res) => {
 app.get("/api/posts", async (req, res) => {
   try {
     const rows = await getPosts();
-    res.json(rows.map(r => ({ ...r, keywords: JSON.parse(r.keywords || "[]") })));
+    res.json(rows.map(r => ({ ...r, image: fixImage(r.image), keywords: JSON.parse(r.keywords || "[]") })));
   } catch (e) {
     res.json([]);
   }
