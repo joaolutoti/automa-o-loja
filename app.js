@@ -150,6 +150,8 @@ function render(lista) {
         const isS = c.tipo === "story";
         const img = c.image && (c.image.startsWith("data:image") || c.image.startsWith("http") || c.image.startsWith("/api/"))
             ? c.image
+            : c.image && c.image.length > 100 && !c.image.startsWith("/")
+            ? `data:image/jpeg;base64,${c.image}`
             : c.image ? `/api/imagens/${c.image.split(/[/\\]/).pop()}`
                 : isS ? "https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?auto=format&fit=crop&q=80&w=800"
                     : "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&q=80&w=800";
