@@ -59,25 +59,22 @@ async function init() {
   }
 }
 
-// ── Salvar imagem (base64 ou URL) ──────────────────────────────
+// ── Salvar imagem como base64 no banco (persiste no redeploy) ──
 async function saveImg(id, source) {
   if (!source) return source;
-  const filename = `img_${crypto.createHash("md5").update(id).digest("hex")}.jpg`;
-  const fullPath = path.join(IMAGENS_DIR, filename);
 
+  // Já é base64 com prefixo data: — extrai só o base64
   if (source.includes("base64,")) {
     try {
-      const buffer = Buffer.from(source.split(",")[1], "base64");
-      fs.writeFileSync(fullPath, buffer);
-      return `/api/imagens/${filename}`;
+      return source.split(",")[1]; // salva só o base64 puro no banco
     } catch { return source; }
   }
 
+  // É URL externa — baixa e converte para base64
   if (typeof source === "string" && source.startsWith("http")) {
     try {
       const resp = await axios.get(source, { responseType: "arraybuffer", timeout: 8000 });
-      fs.writeFileSync(fullPath, resp.data);
-      return `/api/imagens/${filename}`;
+      return Buffer.from(resp.data).toString("base64"); // salva base64 puro no banco
     } catch { return source; }
   }
 
