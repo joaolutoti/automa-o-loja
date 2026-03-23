@@ -189,39 +189,85 @@ app.post("/api/posts/sync", async (req, res) => {
   res.json({ msg: `${ok} posts sincronizados!` });
 });
 
+// ── Buffer temporário para mensagens WhatsApp (foto sem legenda) ──
+// phone -> { postId, imageSource, store, ts }
+const wppBuffer = new Map();
+const BUFFER_TTL = 5 * 60 * 1000; // 5 minutos
+
+// Limpa buffer expirado a cada minuto
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of wppBuffer.entries()) {
+    if (now - val.ts > BUFFER_TTL) wppBuffer.delete(key);
+  }
+}, 60000);
+
+async function salvarPostWpp(postId, store, caption, imageSource) {
+  const precoMatch = caption.match(/R\$\s?[\d.,]+/i);
+  const price = precoMatch ? precoMatch[0].replace(/\s/, "") : "Consulte";
+  const linhas = caption.split("\n").map(l => l.trim()).filter(l => l);
+  const titulo = linhas[0] || "Veículo via WhatsApp";
+  const finalImage = await saveImg(postId, imageSource);
+  const keywords = caption.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
+  await pool.query(
+    `INSERT INTO posts (id, tipo, store, title, description, price, image, url, date, likes, keywords)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE description=VALUES(description), price=VALUES(price), image=IF(image='', VALUES(image), image)`,
+    [postId, "post", store, titulo, caption, price, finalImage, "",
+     new Date().toLocaleDateString("pt-BR"), 0, JSON.stringify(keywords)]
+  );
+  console.log(`✅ WhatsApp salvo: ${titulo}`);
+}
+
 // ── WhatsApp via Z-API + Make ──────────────────────────────────
 app.post("/api/whatsapp", async (req, res) => {
   const data = req.body || {};
   const image = typeof data.image === "object" ? data.image : {};
   const caption = image.caption || data.text || "";
   const imageSource = image.url || image.imageUrl || image.base64 || "";
+  const phone = data.phone || "default";
+  const store = data.senderName ? `@${data.senderName.replace(/\s+/g, "").toLowerCase()}` : "@whatsapp";
 
   if (!caption && !imageSource) {
     return res.status(400).json({ erro: "Mensagem sem conteúdo útil" });
   }
 
-  const precoMatch = caption.match(/R\$\s?[\d.,]+/i);
-  const price = precoMatch ? precoMatch[0].replace(/\s/, "") : "Consulte";
-  const linhas = caption.split("\n").map(l => l.trim()).filter(l => l);
-  const titulo = linhas[0] || "Veículo via WhatsApp";
-  const postId = `wpp_${Date.now()}`;
-  const finalImage = await saveImg(postId, imageSource);
-  const keywords = caption.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-  const store = data.senderName ? `@${data.senderName.replace(/\s+/g, "").toLowerCase()}` : "@whatsapp";
-
   try {
-    await pool.query(
-      `INSERT INTO posts (id, tipo, store, title, description, price, image, url, date, likes, keywords)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      [postId, "post", store, titulo, caption, price, finalImage, "",
-       new Date().toLocaleDateString("pt-BR"), 0, JSON.stringify(keywords)]
-    );
-    console.log(`✅ WhatsApp: ${titulo}`);
-    res.status(201).json({ msg: "Post salvo!", id: postId });
+    // Caso 1: veio foto COM legenda — salva direto
+    if (imageSource && caption) {
+      const postId = `wpp_${Date.now()}`;
+      await salvarPostWpp(postId, store, caption, imageSource);
+      wppBuffer.delete(phone);
+      return res.status(201).json({ msg: "Post salvo!", id: postId });
+    }
+
+    // Caso 2: veio só foto sem legenda — guarda no buffer
+    if (imageSource && !caption) {
+      const postId = `wpp_${Date.now()}`;
+      wppBuffer.set(phone, { postId, imageSource, store, ts: Date.now() });
+      return res.json({ msg: "Foto guardada, aguardando descrição..." });
+    }
+
+    // Caso 3: veio só texto — verifica se tem foto no buffer
+    if (!imageSource && caption) {
+      const buffered = wppBuffer.get(phone);
+      if (buffered) {
+        wppBuffer.delete(phone);
+        await salvarPostWpp(buffered.postId, buffered.store, caption, buffered.imageSource);
+        return res.status(201).json({ msg: "Post salvo com foto + descrição!", id: buffered.postId });
+      }
+      // Texto sem foto — salva só texto
+      const postId = `wpp_${Date.now()}`;
+      await salvarPostWpp(postId, store, caption, "");
+      return res.status(201).json({ msg: "Post salvo (sem foto)", id: postId });
+    }
+
   } catch (e) {
     console.error("Erro WhatsApp:", e.message);
-    res.status(500).json({ erro: e.message });
+    return res.status(500).json({ erro: e.message });
   }
+
+  res.json({ msg: "Nenhuma ação necessária" });
 });
 
 // ── Status ─────────────────────────────────────────────────────
